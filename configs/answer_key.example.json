@@ -1,0 +1,7 @@
+{
+  "note": "Illustrative values only. Replace with the actual key for the student's m.",
+  "answers": {
+    "answer_001": {"mode": "exact", "value": "-m"},
+    "answer_013": {"mode": "numeric", "value": "1.2345", "tolerance": "0.00005"}
+  }
+}

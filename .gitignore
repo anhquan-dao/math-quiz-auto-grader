@@ -1,0 +1,16 @@
+.venv/
+.tools/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+outputs/
+dataset/
+models/*
+!models/.gitkeep
+templates/generated/
+*.log
+.env

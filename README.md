@@ -116,7 +116,11 @@ Global options go before the command:
 | `--marker-map PATH` | None | Explicit canonical marker map in PDF points. |
 | `--calibration-image PATH` | None | Clear tagged photo for an untagged, single-page PDF. |
 | `--page N` | `1` | Template page represented by all input photos. |
-| `--inset-mm N` | `1.5` | Remove this margin from **each** box edge; nonnegative. Use `0` for full boxes or `0.3` for a small margin. |
+| `--inset-mm N` | `0.3` | Interior margin at top/left/right; also bottom if `--south-mm 0`. Nonnegative; `0` keeps the full width. |
+| `--box-mode NAME` | `refine` | Search for photographed frames near template coordinates; `template` uses fixed coordinates. |
+| `--box-search-mm N` | `2` | Maximum distance of detected frame edges from the template prior; nonnegative. |
+| `--south-mm N` | `2` | Expand below the detected/fallback bottom edge; capped at the page edge and before overlapping answer boxes. `0` disables expansion. |
+| `--keep-south-border` | Off | Disable southern-border masking in normalized/binary crops; raw crops always retain original pixels. |
 | `--variant NAME` | `normalized` | OCR crop: `raw`, `normalized`, or `binary`. |
 | `--max-tokens N` | `256` | Positive OCR generation limit per answer. |
 | `--review` | Off | Start the local reviewer and open a browser after processing; Ctrl+C stops it. |
@@ -127,16 +131,18 @@ The individual commands reuse these options with the following required inputs a
 | Command | Options |
 | --- | --- |
 | `build-template` | **Required:** `--tex PATH`, `--pdf PATH`, `--output PATH`. Optional: `--dpi 200`, `--dictionary auto`, `--marker-map PATH`, `--calibration-image PATH`, as described above. |
-| `extract` | **Required:** `--template PATH` (generated template JSON), `--images PATH [PATH ...]`. Optional: `--output outputs/captures`, `--page 1`, `--inset-mm 1.5`, as described above. |
+| `extract` | **Required:** `--template PATH` (generated template JSON), `--images PATH [PATH ...]`. Optional: `--output outputs/captures`, `--page 1`, `--inset-mm 0.3`, `--box-mode refine`, `--box-search-mm 2`, `--south-mm 2`, `--keep-south-border`, as described above. |
 | `download-model` | `--output models/pix2text-mfr` (model destination), `--revision main` (Hugging Face branch, tag, or immutable commit to download). Requires internet. |
 | `recognize` | **Required:** `--extraction PATH` (one paper's extraction JSON). Optional: `--model models/pix2text-mfr`, `--variant normalized`, `--max-tokens 256`, as described above. |
 | `compare` | **Required:** `--recognition PATH` (OCR JSON), `--key PATH` (answer-key JSON), `--output PATH` (comparison JSON destination). |
 | `report` | **Required:** `--captures PATH` (one capture or a batch directory). Optional: `--output outputs/archive`, `--key PATH` or `--demo-expected` (mutually exclusive). No OCR is rerun. |
 | `review` | **Required:** `--archive PATH` (generated archive directory). Optional: `--port 8765`, `--open` (open the browser automatically; off by default). |
 
-At 200 DPI the default 1.5 mm inset removes 12 pixels from each edge. A 71-pixel-high
-box therefore becomes 47 pixels high. Use a smaller inset if handwriting reaches the
-border; changing this option requires regenerating crops and OCR, then the report.
+At 200 DPI the former 1.5 mm inset removed 12 pixels from each edge, shrinking a
+71-pixel-high box to 47 pixels. The new default uses a 2-pixel top/side inset and adds
+16 pixels below the lower frame edge, subject to neighboring-box/page limits. To
+reproduce the old crop geometry, use `--box-mode template --south-mm 0 --inset-mm 1.5`.
+Changing crop options requires regenerating crops and OCR, then the report.
 
 ## HTML review archives
 
@@ -258,10 +264,12 @@ flowchart TD
     R --> W[Warp into canonical PDF coordinates]
     W --> N[Correct shadows and reduce noise]
     N --> B[Adaptive thresholding]
-    W --> C[Crop canonical box interiors]
+    B --> F[Find actual frames near template priors]
+    F --> C[Expand crops below frames and cap at neighboring boxes]
+    W --> C
     N --> C
-    B --> C
-    C --> S[Save raw, normalized, and binary crops]
+    C --> M[Mask southern borders while protecting crossing strokes]
+    M --> S[Save raw, normalized, and binary crops]
 ```
 
 ## Build the template
@@ -338,13 +346,31 @@ Each capture directory contains:
 | `05_normalized.png` | Corrected grayscale page |
 | `06_binary.png` | Adaptive-thresholded page |
 | `07_boxes.png` | Answer region overlay |
+| `08_refined_boxes.png` | Detected frames, or template fallback when detection is uncertain |
+| `09_crop_areas.png` | Actual crop boundaries, including downward expansion |
+| `10_border_mask.png` | Pixels removed from southern borders (white = removed) |
+| `11_border_removed.png` | Normalized page after southern-border removal |
 | `crops/answer_001_{raw,normalized,binary}.png` | Three versions of each answer interior |
+| `crops/answer_001_normalized_unmasked.png` | Expanded crop before border removal |
+| `crops/answer_001_border_mask.png` | Per-answer removal mask for comparison with the unmasked crop |
 | `extraction.json` | Crop paths, coordinates, homography, inliers, reprojection error |
 | `failure.json` | Error details if a capture fails |
 
-`summary.json` records successful and failed captures. Crops exclude a configurable
-border inset (`--inset-mm 1.5` by default). Reduce this if writing touches the box edges;
-inspect raw and normalized variants for lost strokes. Shadows and noise can be reduced,
+`summary.json` records successful and failed captures. Template coordinates guide a
+local search for four printed frame edges in each aligned photo. Uncertain detections
+fall back to the template coordinates and leave the southern border unmasked. The
+extraction JSON records template/frame/crop coordinates, edge support, detected lines,
+expansion limits, and removed-pixel counts. All three crop variants share the same area.
+
+The default 0.3 mm inset trims the top and sides; 2 mm of downward expansion includes
+descenders crossing the bottom edge. Expansion stops before another answer box with
+overlapping horizontal extent and at the page boundary. A mask removes the detected
+southern border from normalized and binary crops, protecting narrow corridors where
+ink continues on both sides. Raw and unmasked crops retain all original strokes for
+inspection. Identical ink coinciding with the border cannot always be separated;
+this is a conservative heuristic, so inspect the masks before relying on OCR. Use
+`--keep-south-border` to disable masking. Nearby instructions outside answer boxes can
+enter expanded crops; reduce `--south-mm` when needed. Shadows and noise can be reduced,
 but clipped highlights, severe blur, folded paper, and curved pages cannot be repaired
 reliably by a planar homography. Lens-distortion correction is not implemented yet.
 

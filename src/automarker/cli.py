@@ -7,6 +7,19 @@ from pathlib import Path
 from .io import configure_logging, read_json, write_json
 
 
+def crop_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--inset-mm", type=float, default=.3,
+                        help="Interior margin at top/sides, and bottom when south-mm is zero (default: 0.3)")
+    parser.add_argument("--box-mode", choices=("refine", "template"), default="refine",
+                        help="Detect frames near template priors, or use fixed coordinates")
+    parser.add_argument("--box-search-mm", type=float, default=2.,
+                        help="Maximum frame-edge search distance from template (default: 2 mm)")
+    parser.add_argument("--south-mm", type=float, default=2.,
+                        help="Expand below the lower frame edge; clipped before other boxes (default: 2 mm)")
+    parser.add_argument("--keep-south-border", action="store_true",
+                        help="Disable bottom border removal from normalized/binary crops")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Offline quiz alignment and math OCR")
     parser.add_argument("--verbose", action="store_true", help="Also show DEBUG logs in console")
@@ -27,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
                          help="Image files or directories (nonrecursive)")
     extract.add_argument("--output", type=Path, default=Path("outputs/captures"))
     extract.add_argument("--page", type=int, default=1)
-    extract.add_argument("--inset-mm", type=float, default=1.5)
+    crop_options(extract)
     download = sub.add_parser("download-model", help="Provision model weights (requires internet)")
     download.add_argument("--output", type=Path, default=Path("models/pix2text-mfr"))
     download.add_argument("--revision", default="main")
@@ -55,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--marker-map", type=Path)
     run.add_argument("--calibration-image", type=Path)
     run.add_argument("--page", type=int, default=1)
-    run.add_argument("--inset-mm", type=float, default=1.5)
+    crop_options(run)
     run.add_argument("--variant", choices=("raw", "normalized", "binary"), default="normalized")
     run.add_argument("--max-tokens", type=int, default=256)
     run.add_argument("--review", action="store_true", help="Open the local quiz reviewer after processing")
@@ -85,7 +98,9 @@ def main(argv: list[str] | None = None) -> int:
             from .workflow import collect_images, process_captures
             template = read_json(args.template)
             summary = process_captures(collect_images(args.images), template, args.output,
-                                       args.page, args.inset_mm)
+                                       args.page, args.inset_mm, box_mode=args.box_mode,
+                                       box_search_mm=args.box_search_mm, south_mm=args.south_mm,
+                                       keep_south_border=args.keep_south_border)
             return 1 if summary["failed"] else 0
         elif args.command == "run":
             from .report import build_archive
@@ -100,7 +115,9 @@ def main(argv: list[str] | None = None) -> int:
                                        read_json(args.marker_map) if args.marker_map else None,
                                        args.calibration_image)
             summary = process_captures(paths, template, args.output / "captures", args.page,
-                                       args.inset_mm, args.model, args.variant, args.max_tokens, key)
+                                       args.inset_mm, args.model, args.variant, args.max_tokens, key,
+                                       box_mode=args.box_mode, box_search_mm=args.box_search_mm,
+                                       south_mm=args.south_mm, keep_south_border=args.keep_south_border)
             if summary["successful"]:
                 build_archive(args.output / "captures", args.output / "archive", key,
                               args.demo_expected, quiz_name=args.tex.stem)

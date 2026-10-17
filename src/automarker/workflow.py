@@ -26,9 +26,11 @@ def collect_images(inputs: list[Path]) -> list[Path]:
 
 
 def process_captures(paths: list[Path], template: dict, output: Path,
-                     page: int = 1, inset_mm: float = 1.5,
+                     page: int = 1, inset_mm: float = .3,
                      model: Path | None = None, variant: str = "normalized",
-                     max_tokens: int = 256, key: dict | None = None) -> dict:
+                     max_tokens: int = 256, key: dict | None = None, *,
+                     box_mode: str = "refine", box_search_mm: float = 2.,
+                     south_mm: float = 2., keep_south_border: bool = False) -> dict:
     engine = None
     if model is not None:
         from .ocr import MathOCR
@@ -38,7 +40,9 @@ def process_captures(paths: list[Path], template: dict, output: Path,
         capture_output = output / path.stem
         stage = "extract"
         try:
-            extract_capture(path, template, capture_output, page, inset_mm)
+            extract_capture(path, template, capture_output, page, inset_mm,
+                            box_mode=box_mode, box_search_mm=box_search_mm,
+                            south_mm=south_mm, keep_south_border=keep_south_border)
             # New crops invalidate recognition and comparisons from an earlier run.
             for filename in ("recognition.json", "comparison.json"):
                 (capture_output / filename).unlink(missing_ok=True)

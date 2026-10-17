@@ -1,6 +1,6 @@
 # Validation on the supplied dataset
 
-Run on 17 October 2026 with Windows, Python 3.12, and the updated tagged PDF.
+Run on 17–18 October 2026 with Windows, Python 3.12, and the updated tagged PDF.
 
 | Check | Result |
 | --- | --- |
@@ -10,7 +10,7 @@ Run on 17 October 2026 with Windows, Python 3.12, and the updated tagged PDF.
 | Answer regions extracted | 260 |
 | Crop variants saved | 780 (raw, normalized, binary) |
 | Marker reprojection RMSE, min / median / max | 0.065 / 0.140 / 0.278 canonical pixels |
-| Unit, local integration, OCR, HTML, CSV, local review service, and opt-in browser tests | 39 passed |
+| Unit, local integration, OCR, HTML, CSV, crop refinement, CLI, local review service, and opt-in browser tests | 64 passed |
 | Ruff | Passed |
 | Dependency consistency (`pip check`) | Passed |
 | Local math OCR | 260 / 260 crops across 20 captures produced LaTeX |
@@ -75,3 +75,22 @@ tests verify that legacy unreviewed rows gain automatic verdicts without losing 
 reviewer corrections or duplicating rows. The packaged wheel includes the browser
 reviewer script and Python assessment helpers. The ZIP remains a snapshot and must be
 regenerated after saving reviews to share the newest CSV.
+
+The bounding-box branch was additionally checked on eight real phone photos (104
+answer regions), with evidence under `outputs/bounding_boxes_preview/real/`. The
+detector accepted 85 frames and used the template fallback for 19. These are detection
+outcomes, not a measured localization accuracy: ground-truth frame coordinates were
+not supplied. Frame edges must come from the same connected printed structure, stay
+within the bounded prior search, and retain approximately the expected dimensions.
+
+Crop tests cover shifted and sloped frames, adjacent-box confusion, fallback when no
+reliable frame is present, page/neighbor expansion limits, border-crossing vertical and
+diagonal strokes, optional mask disabling, and removal-mask bounds. The real-photo
+inspection included an answer whose handwritten `y` descends through the lower border;
+its below-border stroke remains visible after masking. The method cannot reliably
+separate ink that is indistinguishable from the printed frame.
+
+An additional real-photo quick run in `outputs/bounding_boxes_final/` completed template
+creation, frame refinement, expanded crops, local OCR for 13 answers, automatic CSV
+verdicts, and HTML export. Existing `outputs/run/` assessments were left untouched.
+The README option reference is checked against every subcommand's generated help.

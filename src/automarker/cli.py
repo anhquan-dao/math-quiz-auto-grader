@@ -46,7 +46,10 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--images", type=Path, nargs="+", required=True)
     run.add_argument("--output", type=Path, default=Path("outputs/run"))
     run.add_argument("--model", type=Path, default=Path("models/pix2text-mfr"))
-    run.add_argument("--key", type=Path, help="Optional answer key for candidate comparison")
+    expected = run.add_mutually_exclusive_group()
+    expected.add_argument("--key", type=Path, help="Optional answer key for candidate comparison")
+    expected.add_argument("--demo-expected", action="store_true",
+                          help="Use visibly labeled made-up expected answers in the HTML archive")
     run.add_argument("--dpi", type=int, default=200)
     run.add_argument("--dictionary", default="auto")
     run.add_argument("--marker-map", type=Path)
@@ -55,6 +58,20 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--inset-mm", type=float, default=1.5)
     run.add_argument("--variant", choices=("raw", "normalized", "binary"), default="normalized")
     run.add_argument("--max-tokens", type=int, default=256)
+    run.add_argument("--review", action="store_true", help="Open the local quiz reviewer after processing")
+    run.add_argument("--port", type=int, default=8765, help="Local review port when --review is used")
+    report = sub.add_parser("report", help="Create a portable offline HTML review archive")
+    report.add_argument("--captures", type=Path, required=True,
+                        help="One capture directory or a directory containing captures")
+    report.add_argument("--output", type=Path, default=Path("outputs/archive"))
+    report_expected = report.add_mutually_exclusive_group()
+    report_expected.add_argument("--key", type=Path, help="Answer key containing expected values")
+    report_expected.add_argument("--demo-expected", action="store_true",
+                                 help="Display made-up expectations, labeled as demo values")
+    review = sub.add_parser("review", help="Review one quiz with its automatically associated CSV")
+    review.add_argument("--archive", type=Path, required=True)
+    review.add_argument("--port", type=int, default=8765)
+    review.add_argument("--open", action="store_true", help="Open the reviewer in the default browser")
     args = parser.parse_args(argv)
     configure_logging(args.log, args.verbose)
     log = logging.getLogger(__name__)
@@ -71,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
                                        args.page, args.inset_mm)
             return 1 if summary["failed"] else 0
         elif args.command == "run":
+            from .report import build_archive
             from .template import build_template
             from .workflow import collect_images, process_captures
             if args.max_tokens < 1:
@@ -83,7 +101,20 @@ def main(argv: list[str] | None = None) -> int:
                                        args.calibration_image)
             summary = process_captures(paths, template, args.output / "captures", args.page,
                                        args.inset_mm, args.model, args.variant, args.max_tokens, key)
+            if summary["successful"]:
+                build_archive(args.output / "captures", args.output / "archive", key,
+                              args.demo_expected, quiz_name=args.tex.stem)
+                if args.review:
+                    from .review_server import serve_review
+                    serve_review(args.output / "archive", args.port, open_browser=True)
             return 1 if summary["failed"] else 0
+        elif args.command == "report":
+            from .report import build_archive
+            build_archive(args.captures, args.output, read_json(args.key) if args.key else None,
+                          args.demo_expected)
+        elif args.command == "review":
+            from .review_server import serve_review
+            serve_review(args.archive, args.port, args.open)
         elif args.command == "download-model":
             from .ocr import download_model
             download_model(args.output, args.revision)

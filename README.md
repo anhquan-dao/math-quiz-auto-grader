@@ -43,8 +43,8 @@ the console. Global flags go **before** the subcommand:
 ```
 
 ```text
-src/automarker/    CLI, TeX/PDF templates, alignment, OCR, comparison, batch workflow
-scripts/          Thin build_template.py, extract_answers.py, recognize_math.py wrappers
+src/automarker/    Templates, alignment, OCR, comparison, HTML reports, batch workflow
+scripts/          Command wrappers and the optional KaTeX asset update script
 configs/          Answer-key examples and configuration
 templates/        Generated canonical templates (generated/ is ignored)
 models/           Downloaded local weights (ignored)
@@ -61,20 +61,168 @@ See `docs/validation.md` for validation results.
 
 After setup, replace these paths with your TeX source, matching tagged PDF, and photo
 folder. This one command builds the template, aligns every photo, extracts the answer
-boxes, and runs OCR using the local model:
+boxes, runs OCR using the local model, and opens the quiz reviewer:
 
 ```powershell
-& ./.venv/Scripts/python.exe -m automarker run --tex C:/quizzes/quiz.tex --pdf C:/quizzes/quiz.pdf --images C:/quizzes/photos
+& ./.venv/Scripts/python.exe -m automarker run --tex C:/quizzes/quiz.tex --pdf C:/quizzes/quiz.pdf --images C:/quizzes/photos --demo-expected --review
 ```
 
+The browser opens this quiz's **`index.html`** through a local review server. Each source photo has
+its own page, such as `archive/photo_001.jpg.html`, with final crops, rendered recognized
+math, raw TeX, and expected answers side by side. `archive.zip` contains the portable report.
+The HTML is the main review tool: its `assessment.csv` is associated automatically,
+automatic verdicts are already filled in, and each answer has ✓ / ✕ correction buttons.
+Approve each page's save to persist your review. Stop the server with Ctrl+C when done;
+omit `--review` to generate the archive and exit without opening the viewer.
+`--demo-expected` supplies made-up expected values clearly labeled as demo content;
+replace it with `--key PATH` for your real answer key, or omit both to leave expectations blank.
+
 The default output is `outputs/run/`: the template is in `template/`, and each paper's
-OCR text is in `captures/<photo_stem>/recognition.json` under `answers[].ocr.latex`.
+machine-readable OCR is in `captures/<photo_stem>/recognition.json` under `answers[].ocr.latex`.
 Each capture also includes crops, inspection images, and `extraction.json`;
 `captures/summary.json` lists successes and failures. The model loads once for the batch.
 Use `--output PATH` to select another output root, `--model PATH` for local model weights,
 or `--key PATH` to also write a candidate `comparison.json` for each paper.
 The command does not download missing models; run the setup download command first.
 Use `--page N` when all input photos represent a particular page of a multipage quiz.
+
+## Command-line options
+
+Use `python -m automarker --help` to list commands, or
+`python -m automarker COMMAND --help` for that command's options. `-h` / `--help`
+is available globally and on every command. Paths below are relative to the working
+directory unless absolute. Required options are marked **required**.
+
+Global options go before the command:
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `--verbose` | Off | Also print DEBUG logs to the console. |
+| `--log PATH` | `outputs/logs/automarker.log` | DEBUG log file. |
+
+`run` builds the template, extracts photos, runs OCR, and exports the HTML/CSV archive:
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `--tex PATH` | **required** | TeX source defining answer boxes. |
+| `--pdf PATH` | **required** | Matching compiled PDF. |
+| `--images PATH [PATH ...]` | **required** | Photo files or nonrecursive photo directories. |
+| `--output PATH` | `outputs/run` | Root for template, captures, and archive. |
+| `--model PATH` | `models/pix2text-mfr` | Provisioned local OCR model. |
+| `--key PATH` | None | Real JSON answer key; also writes comparison JSON. |
+| `--demo-expected` | Off | Made-up expectations for visualization; mutually exclusive with `--key`. |
+| `--dpi N` | `200` | Canonical PDF rendering resolution, from 72 to 600 DPI. |
+| `--dictionary NAME` | `auto` | ArUco dictionary, e.g. `DICT_4X4_1000`. |
+| `--marker-map PATH` | None | Explicit canonical marker map in PDF points. |
+| `--calibration-image PATH` | None | Clear tagged photo for an untagged, single-page PDF. |
+| `--page N` | `1` | Template page represented by all input photos. |
+| `--inset-mm N` | `1.5` | Remove this margin from **each** box edge; nonnegative. Use `0` for full boxes or `0.3` for a small margin. |
+| `--variant NAME` | `normalized` | OCR crop: `raw`, `normalized`, or `binary`. |
+| `--max-tokens N` | `256` | Positive OCR generation limit per answer. |
+| `--review` | Off | Start the local reviewer and open a browser after processing; Ctrl+C stops it. |
+| `--port N` | `8765` | Local review port when `--review` is enabled. |
+
+The individual commands reuse these options with the following required inputs and defaults:
+
+| Command | Options |
+| --- | --- |
+| `build-template` | **Required:** `--tex PATH`, `--pdf PATH`, `--output PATH`. Optional: `--dpi 200`, `--dictionary auto`, `--marker-map PATH`, `--calibration-image PATH`, as described above. |
+| `extract` | **Required:** `--template PATH` (generated template JSON), `--images PATH [PATH ...]`. Optional: `--output outputs/captures`, `--page 1`, `--inset-mm 1.5`, as described above. |
+| `download-model` | `--output models/pix2text-mfr` (model destination), `--revision main` (Hugging Face branch, tag, or immutable commit to download). Requires internet. |
+| `recognize` | **Required:** `--extraction PATH` (one paper's extraction JSON). Optional: `--model models/pix2text-mfr`, `--variant normalized`, `--max-tokens 256`, as described above. |
+| `compare` | **Required:** `--recognition PATH` (OCR JSON), `--key PATH` (answer-key JSON), `--output PATH` (comparison JSON destination). |
+| `report` | **Required:** `--captures PATH` (one capture or a batch directory). Optional: `--output outputs/archive`, `--key PATH` or `--demo-expected` (mutually exclusive). No OCR is rerun. |
+| `review` | **Required:** `--archive PATH` (generated archive directory). Optional: `--port 8765`, `--open` (open the browser automatically; off by default). |
+
+At 200 DPI the default 1.5 mm inset removes 12 pixels from each edge. A 71-pixel-high
+box therefore becomes 47 pixels high. Use a smaller inset if handwriting reaches the
+border; changing this option requires regenerating crops and OCR, then the report.
+
+## HTML review archives
+
+To make the same report from existing extraction and OCR results without rerunning OCR:
+
+```powershell
+& ./.venv/Scripts/python.exe -m automarker report --captures outputs/captures --output outputs/archive --demo-expected
+```
+
+`--captures` accepts a batch folder or one paper's output folder. Paper pages retain the original image filename plus
+`.html`. Each row places the normalized crop, recognized formula, and expected formula
+next to each other, with raw TeX visible beneath the rendered math. Expand **Other crop
+versions** to inspect raw and binary crops. Papers without OCR explicitly say so;
+the report never invents recognized text.
+
+The output includes `archive.json` with page names and counts, `expected.json` with the
+expected values used, `assessment.csv`, and `outputs/archive.zip` for sharing. Demo expectations carry
+`"demo": true` and a prominent warning on every page. For real expectations, pass
+`--key configs/your_answer_key.json` instead. JSON comparisons remain review candidates.
+
+### Review and save assessments
+
+Start the reviewer for an existing archive:
+
+```powershell
+& ./.venv/Scripts/python.exe -m automarker review --archive outputs/archive --open
+```
+
+The offline server binds to `127.0.0.1:8765` and uses only this archive's
+`assessment.csv`. Use `--port NUMBER` if another reviewer is already using that port.
+There is no CSV linking step or file picker.
+
+1. Open a paper from this quiz's index. Each answer shows its **Auto: Correct** or
+   **Auto: Incorrect** verdict, with the corresponding ✓ or ✕ button selected.
+2. Confirm or override the decision with **✓ Correct** or **✕ Incorrect**, and optionally
+   add notes. The CSV is unchanged while you edit.
+3. Click **Save page** or **Save & next**. Read the paper-specific confirmation and click
+   **Allow CSV update**.
+4. Each paper requires a fresh confirmation. Cancelling leaves the CSV untouched and
+   keeps your edits on the page.
+
+The Next paper link also asks permission to save before moving on. Navigation away from
+unsaved edits is guarded; closing/reloading a dirty page shows the browser's unsaved-changes
+warning. **Reload saved verdicts** discards the draft only after confirmation and reads the
+current CSV. The index shows correct/incorrect totals and the number of answers a human
+has reviewed, using this quiz's CSV automatically.
+
+One CSV row represents one answer. `source_image`, `page`, and `answer_id` identify it;
+`recognized_latex`, `expected_latex`, `demo_expected`, and `suggested_verdict` retain the
+machine context. `auto_verdict` stores the initial binary decision, and `verdict` starts
+with that same decision immediately after a quick run. `notes` and `reviewed_at` (UTC ISO
+timestamp) remain empty until a reviewer approves a page save. Human corrections change
+`verdict` and preserve `auto_verdict`. Missing expected answers leave both verdicts blank;
+choose ✓ or ✕ manually before saving. Demo expectations also produce automatic verdicts,
+but remain prominently labeled as made-up values and are unsuitable for real grading.
+TeX and notes are stored as literal text, with reversible apostrophe escaping for
+spreadsheet formula prefixes. Import TeX columns as text when working in spreadsheet apps.
+
+Each approved save rereads the current file, preserves other papers and extra columns,
+and updates only the current paper's rows. Conflicting edits to the same paper from another
+tab stop the save and require reloading. Regenerating unchanged reports preserves the
+CSV byte for byte. Older CSVs gain automatic verdicts while retaining existing reviewer
+decisions and notes. Changed OCR or expected values receive a distinct `archive_id`, so
+old decisions are not silently applied to a different assessment version.
+
+The ZIP is a snapshot; saving a review updates this quiz's CSV on disk, not the ZIP.
+Rerun the `report` command to package the latest saved CSV for sharing. Keep the HTML
+pages and `assessment.csv` together when transferring a review.
+
+Each HTML page embeds its crop images, math renderer, and fonts, so even an individual
+page works after copying it elsewhere. ZIP files need to be extracted before opening
+`index.html`. Opening the HTML directly displays the saved snapshot; saving corrections
+requires the local `review` command above. No internet connection, CDN, or extra Python
+report library is required. Math is rendered with bundled [KaTeX](https://katex.org/docs/browser);
+unrenderable OCR retains its raw TeX with an explicit preview fallback.
+
+For optional browser regression checks, install Node.js, Chrome, and the Node Playwright
+package, then set `AUTOMARKER_BROWSER_TESTS=1` before running pytest. If needed, set
+`AUTOMARKER_NODE` to the Node executable and `AUTOMARKER_PLAYWRIGHT` to the Playwright
+module directory. The check uses isolated browser test files; it never changes your
+assessment CSV or requires internet access.
+
+KaTeX's MIT license and release provenance are included in `src/automarker/assets/katex/`.
+Maintainers can refresh the pinned assets while online with
+`python scripts/vendor_katex.py --version 0.19.0`; the script checks npm's SHA-512 package
+integrity. Generating or opening reports never downloads assets.
 
 ## Pipeline
 
@@ -88,9 +236,15 @@ flowchart TD
     C --> O[Offline math OCR]
     M[Local model weights] --> O
     O --> R[recognition.json: LaTeX per answer]
+    R --> AHTML[Offline HTML archive with crops and rendered math]
     R --> G[Optional answer-key comparison]
     K[Predetermined answer key] --> G
-    G --> H[Human review]
+    G --> CSV0[Prefill assessment.csv with automatic verdicts]
+    CSV0 --> AHTML
+    AHTML --> H[Review automatic verdicts with tick or cross]
+    H --> PCSV{Allow CSV update for this paper?}
+    PCSV -->|Allow| CSV[Update assessment.csv]
+    PCSV -->|Cancel| H
 ```
 
 The image processing stages save intermediate images for inspection:

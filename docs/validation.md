@@ -10,11 +10,10 @@ Run on 17 October 2026 with Windows, Python 3.12, and the updated tagged PDF.
 | Answer regions extracted | 260 |
 | Crop variants saved | 780 (raw, normalized, binary) |
 | Marker reprojection RMSE, min / median / max | 0.065 / 0.140 / 0.278 canonical pixels |
-| Unit, optional local integration, and offline OCR tests | 11 passed |
-| Clean checkout without local inputs or weights | 9 passed, 2 optional tests skipped |
+| Unit, local integration, OCR, HTML, CSV, local review service, and opt-in browser tests | 39 passed |
 | Ruff | Passed |
 | Dependency consistency (`pip check`) | Passed |
-| Local math OCR | 13 / 13 crops on `capture_01_near_flat` produced LaTeX |
+| Local math OCR | 260 / 260 crops across 20 captures produced LaTeX |
 | Explicit network prohibition | Local model loaded and generated with socket connections blocked |
 
 The capture set includes tilt, rotation, perspective, dim/warm/cool illumination,
@@ -42,3 +41,37 @@ The `run` workflow was also checked on two local captures: template creation,
 extraction, offline OCR, and candidate key comparison completed for both papers
 (26 answers). Evidence is in `outputs/run_smoke/`. The local input files are not
 tracked in Git; the corresponding integration test skips when they are unavailable.
+
+The HTML archive in `outputs/quiz_gt2/archive/` contains 20 photo-named pages and
+260 answer rows, with intentionally made-up expectations labeled as demo values.
+Its ZIP was extracted to a separate directory and every page was opened in headless
+Chrome while HTTP/HTTPS requests were blocked. All crop images loaded, no script errors
+or external requests occurred, and desktop/mobile layouts had no horizontal page overflow.
+Of the 520 OCR/expected formula previews, 519 rendered; one malformed OCR result showed
+the intended raw-TeX fallback. The index and paper layouts were visually inspected.
+
+The `run` command's automatic HTML export was exercised on an additional single-paper
+run. The updated quick run in `outputs/auto_verdict_smoke/` produced 13 automatic CSV
+verdicts with empty human-review timestamps. A wheel build also verified that the renderer,
+review service, stylesheet, license, and all 20 WOFF2 font files are included in the package.
+
+The HTML reviewer automatically uses its quiz archive's `assessment.csv`. Its 260 answer
+rows have automatic binary verdicts before human review; the viewer shows these verdicts
+and uses mutually exclusive tick/cross buttons for corrections. Browser checks covered
+draft edits, cancellation, explicit approval, save-and-next navigation, restoration on
+reopening, and conflicting edits from another reviewer. Drafts and cancellation left the
+CSV byte for byte unchanged; approved saves preserved all other papers' records. Quoted
+multiline Vietnamese notes round-tripped through the actual CSV and Python reader.
+Programmatic clicks on the approval button were rejected.
+
+The repeatable opt-in browser test uses the real loopback review service and an isolated
+temporary CSV; it never modifies the quiz assessment file. Server tests verify mandatory
+page approval, quiz identity, request origin and token checks, binary verdict validation,
+locked-file handling, and version conflicts. Browser file selection is no longer required.
+The service serves one archive on localhost and requires no internet connection.
+
+Report regeneration was verified to preserve an unchanged CSV byte for byte. Migration
+tests verify that legacy unreviewed rows gain automatic verdicts without losing prior
+reviewer corrections or duplicating rows. The packaged wheel includes the browser
+reviewer script and Python assessment helpers. The ZIP remains a snapshot and must be
+regenerated after saving reviews to share the newest CSV.

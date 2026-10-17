@@ -39,6 +39,9 @@ def process_captures(paths: list[Path], template: dict, output: Path,
         stage = "extract"
         try:
             extract_capture(path, template, capture_output, page, inset_mm)
+            # New crops invalidate recognition and comparisons from an earlier run.
+            for filename in ("recognition.json", "comparison.json"):
+                (capture_output / filename).unlink(missing_ok=True)
             if engine is not None:
                 from .ocr import recognize_extraction
                 stage = "recognize"

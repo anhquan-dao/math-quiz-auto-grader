@@ -30,6 +30,9 @@ automarker = "automarker.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+automarker = ["assets/*.css", "assets/*.js", "assets/katex/*", "assets/katex/fonts/*.woff2"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--basetemp=outputs/pytest-tmp"

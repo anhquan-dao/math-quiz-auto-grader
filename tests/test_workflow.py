@@ -38,10 +38,14 @@ def test_batch_continues_after_bad_capture_and_clears_stale_failure(tmp_path):
     write_image(good, image)
     output = tmp_path / "captures"
     write_json(output / "good/failure.json", {"error": "obsolete failure"})
+    write_json(output / "good/recognition.json", {"stale": True})
+    write_json(output / "good/comparison.json", {"stale": True})
     summary = process_captures([bad, good], template, output)
     assert summary["successful"] == [str(good)]
     assert summary["failed"][0]["input"] == str(bad)
     assert summary["failed"][0]["stage"] == "extract"
     assert not (output / "good/failure.json").exists()
+    assert not (output / "good/recognition.json").exists()
+    assert not (output / "good/comparison.json").exists()
     assert (output / "good/extraction.json").is_file()
     assert read_json(output / "summary.json") == summary

@@ -74,4 +74,5 @@ def recognize_extraction(extraction_path: Path, model_path: Path, variant: str =
     manifest = model_path / "automarker_model.json"
     extraction["ocr_model"] = read_json(manifest) if manifest.exists() else {"path": str(model_path)}
     write_json(extraction_path.parent / "recognition.json", extraction)
+    LOG.info("Recognized %d answers in %s", len(extraction["answers"]), extraction_path.parent)
     return extraction

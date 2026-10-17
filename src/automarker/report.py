@@ -85,7 +85,9 @@ OCR suggestions and reviewer verdicts are stored separately.</footer></main>{scr
 def _review_tools(command: str, paper: bool = False, last: bool = False) -> str:
     buttons = ""
     if paper:
-        buttons += ('<button type="button" data-reload-csv>Reload saved verdicts</button>'
+        buttons += ('<button type="button" data-toggle-latex aria-controls="answer-table" '
+                    'aria-pressed="false">Show recognized LaTeX</button>'
+                    '<button type="button" data-reload-csv>Reload saved verdicts</button>'
                     '<button type="button" data-save-page>Save page</button>'
                     f'<button type="button" class="primary" data-save-next>'
                     f'{"Save &amp; finish" if last else "Save &amp; next"}</button>')
@@ -149,12 +151,17 @@ def _paper_page(record: dict, key: dict, previous: str | None, following: str | 
     for number, answer in enumerate(data["answers"], start=1):
         answer_id = str(answer["id"])
         files = answer["files"]
-        variant = "normalized" if "normalized" in files else "raw"
+        variant = data.get("ocr_variant", data.get("crop_variant", "normalized"))
+        if variant not in files:
+            variant = next(name for name in ("normalized", "raw", "binary") if name in files)
         crop = _image(capture, files[variant], f"Final crop for {answer_id}")
+        overlay = answer.get("normalized_overlay") == "south_border_mask_red"
+        if variant == "normalized" and overlay:
+            crop += '<p class="hint">Red: removed south-border pixels. OCR uses a clean copy.</p>'
         alternatives = "".join(
             f'<div class="variant"><span>{escape(name.title())}</span>'
             f'{_image(capture, files[name], f"{name} crop for {answer_id}")}</div>'
-            for name in ("raw", "binary") if name != variant and name in files
+            for name in ("raw", "normalized", "binary") if name != variant and name in files
         )
         if alternatives:
             crop += f'<details><summary>Other crop versions</summary>{alternatives}</details>'
@@ -186,7 +193,7 @@ def _paper_page(record: dict, key: dict, previous: str | None, following: str | 
             for value, symbol in (("correct", "&#10003;"), ("incorrect", "&#10007;")))
         rows.append(f"""<tr><td><div class="answer-heading"><span class="number">{number:02d}</span>
 <strong>{escape(answer_id)}</strong><span class="crop-label">{variant}</span></div>
-<div class="crop">{crop}</div></td><td><span class="cell-label">Recognized LaTeX</span>
+<div class="crop">{crop}</div></td><td class="recognized-latex-column"><span class="cell-label">Recognized LaTeX</span>
 {recognized}</td><td><span class="cell-label">Expected answer</span>
 <span class="badge {status_class}">{status}</span>{expected_html}</td>
 <td class="review-cell" data-review-answer="{escape(answer_id, quote=True)}">
@@ -203,8 +210,9 @@ aria-label="Notes for {escape(answer_id, quote=True)}" placeholder="Optional not
 <header><h1>{name}</h1><p class="subtitle">Page {escape(str(data.get('page', 1)))} &middot;
 {len(rows)} answer regions &middot; {recognized_count} recognized</p></header>{_banner(demo)}
 {_review_tools(review['command'], paper=True, last=following is None)}
-<div class="table-wrap"><table class="answers"><colgroup><col><col><col><col></colgroup>
-<thead><tr><th scope="col">Final answer crop</th><th scope="col">Recognized LaTeX</th>
+<div class="table-wrap"><table id="answer-table" class="answers" data-latex-hidden="true">
+<colgroup><col><col class="recognized-latex-column"><col><col></colgroup>
+<thead><tr><th scope="col">Final answer crop</th><th scope="col" class="recognized-latex-column">Recognized LaTeX</th>
 <th scope="col">Expected answer {'(demo)' if demo else ''}</th><th scope="col">Reviewer verdict</th></tr></thead>
 <tbody>{''.join(rows)}</tbody></table></div>
 <div class="review-bottom"><button type="button" data-save-page>Save page</button>

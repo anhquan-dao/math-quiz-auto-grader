@@ -85,6 +85,14 @@ Use `--output PATH` to select another output root, `--model PATH` for local mode
 or `--key PATH` to also write a candidate `comparison.json` for each paper.
 The command does not download missing models; run the setup download command first.
 Use `--page N` when all input photos represent a particular page of a multipage quiz.
+Output is compact by default: the input photo, binary page, actual crop overlay,
+selected OCR crops, binary crops, and JSON results. Add `--debug-images` to retain
+all intermediate stages, alternate crops, and border masks under each paper's `debug/`.
+South-border removal defaults to **Bidirectional Recovery**. Add
+`--south-border-method protected-crossings` to use **Protected Crossings**, or
+`--south-border-method bidirectional-recovery` to select the default explicitly.
+For Bidirectional Recovery, `--horizontal-dilation-width-px 15` gives a 7-pixel reach
+in each direction; use another positive span to tune recovery.
 
 ## Command-line options
 
@@ -121,7 +129,14 @@ Global options go before the command:
 | `--box-search-mm N` | `2` | Maximum distance of detected frame edges from the template prior; nonnegative. |
 | `--south-mm N` | `2` | Expand below the detected/fallback bottom edge; capped at the page edge and before overlapping answer boxes. `0` disables expansion. |
 | `--keep-south-border` | Off | Disable southern-border masking in normalized/binary crops; raw crops always retain original pixels. |
-| `--variant NAME` | `normalized` | OCR crop: `raw`, `normalized`, or `binary`. |
+| `--south-border-method NAME` | `bidirectional-recovery` | Choose `bidirectional-recovery` (erase and restore crossings) or `protected-crossings` (protect crossing corridors while masking). Ignored when `--keep-south-border` is set or frame detection is uncertain. |
+| `--horizontal-dilation-width-px N` | `15` | Positive integer horizontal span for Bidirectional Recovery: 15 reaches 7 pixels each way; 3 reaches 1 pixel each way; 1 selects vertical-only recovery. Measured at template DPI; unused by Protected Crossings. |
+| `--tighten-ew` / `--no-tighten-ew` | On | Enable/disable both east/west tightening stages. Applies to every saved crop variant. |
+| `--tighten-mode NAME` | `both` | `static` removes a fixed strip; `dynamic` trims redundant whitespace; `both` runs static first, then dynamic. |
+| `--static-tighten-mm N` | `1.5` | Nonnegative fixed amount removed from **each** east/west edge in static/both mode, regardless of content. |
+| `--tighten-padding-mm N` | `1.5` | Nonnegative whitespace margin retained on each side of detected content in dynamic/both mode. Does not expand beyond the preceding stage. |
+| `--debug-images` | Off | Save intermediate stages, border masks, and alternate crop variants under `debug/`. DEBUG text logs are always kept. |
+| `--variant NAME` | `normalized` | Crop to retain and use for OCR: `raw`, `normalized`, or `binary`. Binary crops are always kept. |
 | `--max-tokens N` | `256` | Positive OCR generation limit per answer. |
 | `--review` | Off | Start the local reviewer and open a browser after processing; Ctrl+C stops it. |
 | `--port N` | `8765` | Local review port when `--review` is enabled. |
@@ -131,7 +146,7 @@ The individual commands reuse these options with the following required inputs a
 | Command | Options |
 | --- | --- |
 | `build-template` | **Required:** `--tex PATH`, `--pdf PATH`, `--output PATH`. Optional: `--dpi 200`, `--dictionary auto`, `--marker-map PATH`, `--calibration-image PATH`, as described above. |
-| `extract` | **Required:** `--template PATH` (generated template JSON), `--images PATH [PATH ...]`. Optional: `--output outputs/captures`, `--page 1`, `--inset-mm 0.3`, `--box-mode refine`, `--box-search-mm 2`, `--south-mm 2`, `--keep-south-border`, as described above. |
+| `extract` | **Required:** `--template PATH` (generated template JSON), `--images PATH [PATH ...]`. Optional: `--output outputs/captures`, `--page 1`, `--inset-mm 0.3`, `--box-mode refine`, `--box-search-mm 2`, `--south-mm 2`, `--keep-south-border`, `--south-border-method bidirectional-recovery`, `--horizontal-dilation-width-px 15`, `--variant normalized`, `--debug-images`, `--tighten-ew` / `--no-tighten-ew`, `--tighten-mode both`, `--static-tighten-mm 1.5`, `--tighten-padding-mm 1.5`, as described above. |
 | `download-model` | `--output models/pix2text-mfr` (model destination), `--revision main` (Hugging Face branch, tag, or immutable commit to download). Requires internet. |
 | `recognize` | **Required:** `--extraction PATH` (one paper's extraction JSON). Optional: `--model models/pix2text-mfr`, `--variant normalized`, `--max-tokens 256`, as described above. |
 | `compare` | **Required:** `--recognition PATH` (OCR JSON), `--key PATH` (answer-key JSON), `--output PATH` (comparison JSON destination). |
@@ -153,9 +168,13 @@ To make the same report from existing extraction and OCR results without rerunni
 ```
 
 `--captures` accepts a batch folder or one paper's output folder. Paper pages retain the original image filename plus
-`.html`. Each row places the normalized crop, recognized formula, and expected formula
-next to each other, with raw TeX visible beneath the rendered math. Expand **Other crop
-versions** to inspect raw and binary crops. Papers without OCR explicitly say so;
+`.html`. Each row places the normalized crop and expected formula beside the review
+controls. The recognized LaTeX column is **hidden by default on each paper**. Use
+**Show recognized LaTeX** to reveal its rendered formulas and raw TeX, or **Hide
+recognized LaTeX** to hide it again. This view control also works when opening HTML
+directly and does not change OCR results or the assessment CSV. Expand **Other crop
+versions** to inspect retained alternate crops. Raw alternates are available with
+`--debug-images` or when `--variant raw` was selected. Papers without OCR explicitly say so;
 the report never invents recognized text.
 
 The output includes `archive.json` with page names and counts, `expected.json` with the
@@ -253,13 +272,14 @@ flowchart TD
     PCSV -->|Cancel| H
 ```
 
-The image processing stages save intermediate images for inspection:
+The image processing stages retain compact inspection images by default; add
+`--debug-images` to save all intermediate stages:
 
 ```mermaid
 flowchart TD
     I[Input photo] --> D[Detect tag IDs and subpixel corners]
     D --> V{Enough consistent tag corners?}
-    V -->|No| F[Record capture failure and continue batch]
+    V -->|No| FAIL[Record capture failure and continue batch]
     V -->|Yes| R[Estimate RANSAC homography]
     R --> W[Warp into canonical PDF coordinates]
     W --> N[Correct shadows and reduce noise]
@@ -268,8 +288,14 @@ flowchart TD
     F --> C[Expand crops below frames and cap at neighboring boxes]
     W --> C
     N --> C
-    C --> M[Mask southern borders while protecting crossing strokes]
-    M --> S[Save raw, normalized, and binary crops]
+    C --> M{South-border method?}
+    M -->|Default: bidirectional-recovery| BR[Erase band and restore original ink with bidirectional recovery]
+    M -->|protected-crossings| PC[Mask border while protecting crossing corridors]
+    M -->|keep-south-border| ST[Static east/west edge cut]
+    BR --> ST
+    PC --> ST
+    ST --> DT[Dynamic east/west whitespace trim]
+    DT --> S[Save retained crop variants]
 ```
 
 ## Build the template
@@ -335,44 +361,160 @@ adaptive thresholding. It requires at least two shared, spatially separated tags
 inconsistent tag geometry or answer regions outside the photo reject that capture.
 Batch processing continues and returns a nonzero exit code if any capture fails.
 
-Each capture directory contains:
+Each capture directory normally contains:
 
 | File | Purpose |
 | --- | --- |
 | `01_input.png` | Original decoded photo |
-| `02_illumination.png` | Shadow-corrected photo |
-| `03_markers.png` | Detected tag IDs and corners |
-| `04_aligned.png` | Color page in canonical PDF coordinates |
-| `05_normalized.png` | Corrected grayscale page |
-| `06_binary.png` | Adaptive-thresholded page |
-| `07_boxes.png` | Answer region overlay |
-| `08_refined_boxes.png` | Detected frames, or template fallback when detection is uncertain |
-| `09_crop_areas.png` | Actual crop boundaries, including downward expansion |
-| `10_border_mask.png` | Pixels removed from southern borders (white = removed) |
-| `11_border_removed.png` | Normalized page after southern-border removal |
-| `crops/answer_001_{raw,normalized,binary}.png` | Three versions of each answer interior |
-| `crops/answer_001_normalized_unmasked.png` | Expanded crop before border removal |
-| `crops/answer_001_border_mask.png` | Per-answer removal mask for comparison with the unmasked crop |
+| `02_binary.png` | Adaptive-thresholded aligned page |
+| `03_boxes.png` | Actual crop boundaries, including downward expansion |
+| `crops/answer_001_normalized.png` | Normalized preview with removed south-border pixels shown in red; OCR uses a temporary clean copy. `--variant raw` saves `_raw.png` instead. |
+| `crops/answer_001_binary.png` | Binary crop; saved once if `--variant binary` is selected |
 | `extraction.json` | Crop paths, coordinates, homography, inliers, reprojection error |
+| `recognition.json` | OCR results after `run` or `recognize` |
+| `comparison.json` | Optional comparison when `run --key PATH` is supplied |
 | `failure.json` | Error details if a capture fails |
+
+For a successful 13-answer quick run this is **31 files per paper**, or 32 with a
+comparison JSON. To match the raw/binary crop pair, use `--variant raw` on `run` or
+`extract`. The HTML viewer displays the chosen OCR crop. Add `--debug-images` for:
+
+| Debug file | Purpose |
+| --- | --- |
+| `debug/02_illumination.png` | Shadow-corrected source photo |
+| `debug/03_markers.png` | Detected tag IDs and corners |
+| `debug/04_aligned.png` | Aligned color page |
+| `debug/05_normalized.png` | Normalized grayscale page |
+| `debug/07_template_boxes.png` | Original template box boundaries |
+| `debug/08_refined_boxes.png` | Detected frames and template fallbacks |
+| `debug/10_border_mask.png` | Removed border pixels, shown in white |
+| `debug/11_border_removed.png` | Normalized page after masking |
+| `debug/crops/answer_001_*.png` | Alternate crop variants, unmasked normalized crop, and removal mask |
+
+Successful reruns remove obsolete known stage images and unused variants for the
+current answers, including images from the older layout. Other files are retained.
+Existing outputs are left as they are until rerun. Text DEBUG logging is independent
+of `--debug-images` and remains enabled for every command.
+
+Normalized PNGs show the applied south-border removal mask in **red**, including in
+the HTML viewer. Only removed pixels are colored; protected crossing strokes retain
+their original grayscale values. The `normalized_overlay` field identifies these
+previews in extraction and recognition JSON. OCR restores their red pixels to white
+in a temporary clean PNG and deletes that file afterward, including on failure. This
+adds no permanent files and leaves the colored review preview unchanged. Binary crops
+remain clean and raw crops retain original pixels. If masking is disabled or no reliable
+frame is detected, no red overlay is drawn. Regenerate existing crops/reports to see it.
+
+East/west tightening has two stages after thresholding and southern-border masking.
+Both are enabled by default for `run` and `extract`, in this order:
+
+1. **Static** cuts a fixed 1.5 mm from each east/west edge (12 pixels at 200 DPI).
+   It removes edge artifacts without inspecting content. This cut is additional to
+   `--inset-mm`; reduce it if writing reaches an edge. A cut that would empty a crop
+   fails explicitly instead of silently producing an invalid image.
+2. **Dynamic** measures foreground in the statically trimmed crop, removes redundant
+   whitespace, and keeps 1.5 mm padding around the writing. It never restores pixels
+   discarded by static tightening. Higher dynamic padding retains more space.
+
+Append these options to your existing `run` or `extract` command:
+
+| Behavior | Options |
+| --- | --- |
+| Static only | `--tighten-mode static --static-tighten-mm 1.5` |
+| Dynamic only | `--tighten-mode dynamic --tighten-padding-mm 1.5` |
+| Static, then dynamic (default) | `--tighten-mode both --static-tighten-mm 1.5 --tighten-padding-mm 1.5` |
+| Disable both stages | `--no-tighten-ew` |
+
+The dynamic stage excludes a confidently detected
+printed frame on a measurement copy, including rounded corners; raw pixels
+are not painted over. Small disconnected marks, dots, and minus signs are retained.
+Residual noise or an uncertain frame can limit how much whitespace is removed. Ink
+inseparable from a frame can make the estimated limits uncertain; use a larger margin
+when writing touches a border.
+
+All retained variants use the same new horizontal bounds, while the north/south limits
+stay unchanged. Dynamic tightening leaves blank crops at their current width; static
+tightening still applies its fixed cut to blank crops. No extra files are generated.
+`03_boxes.png` shows the final limits. Each answer's `pre_tighten_bbox_px`,
+`post_static_bbox_px`, and `bbox_px` in `extraction.json` record the three rectangles;
+`static_tighten_ew_px` and `dynamic_tighten_ew_px` record each stage's cuts, while
+`tighten_ew_px` records the total. Regenerate extraction, OCR, and the report
+to apply it to existing results.
 
 `summary.json` records successful and failed captures. Template coordinates guide a
 local search for four printed frame edges in each aligned photo. Uncertain detections
 fall back to the template coordinates and leave the southern border unmasked. The
 extraction JSON records template/frame/crop coordinates, edge support, detected lines,
-expansion limits, and removed-pixel counts. All three crop variants share the same area.
+expansion limits, and removed-pixel counts. All retained crop variants share the same area.
 
 The default 0.3 mm inset trims the top and sides; 2 mm of downward expansion includes
 descenders crossing the bottom edge. Expansion stops before another answer box with
 overlapping horizontal extent and at the page boundary. A mask removes the detected
-southern border from normalized and binary crops, protecting narrow corridors where
-ink continues on both sides. Raw and unmasked crops retain all original strokes for
-inspection. Identical ink coinciding with the border cannot always be separated;
+southern border for normalized OCR and binary crops. **Bidirectional Recovery** is
+the default: it erases the band, dilates vertically, and uses left/right overlap to
+select original ink to restore. **Protected Crossings**, selected with
+`--south-border-method protected-crossings`, masks the border while protecting narrow
+corridors where ink continues on both sides. `crop_options` in `extraction.json` records
+the selection and horizontal span. Each answer's `south_border` records its method,
+whether masking was applied, and the recovery geometry when used.
+With `--debug-images`, raw and unmasked crops retain all
+original strokes for inspection. Identical ink coinciding with the border cannot always be separated;
 this is a conservative heuristic, so inspect the masks before relying on OCR. Use
 `--keep-south-border` to disable masking. Nearby instructions outside answer boxes can
 enter expanded crops; reduce `--south-mm` when needed. Shadows and noise can be reduced,
 but clipped highlights, severe blur, folded paper, and curved pages cannot be repaired
 reliably by a planar homography. Lens-distortion correction is not implemented yet.
+
+## South-border removal methods
+
+This comparison from the real photos shows the original binary, **Protected
+Crossings**, complete band erasure, vertical-only recovery, and **Bidirectional
+Recovery**. Each example includes the whole crop and a magnified border strip.
+
+![South-border removal: original, Protected Crossings, band erasure, vertical-only recovery, and Bidirectional Recovery](docs/assets/comparison.png)
+
+The image is kept in Git as documentation. Both methods are available through
+`run` and `extract`. Use `--south-border-method protected-crossings` for the
+original method or `--south-border-method bidirectional-recovery` for the default.
+`--horizontal-dilation-width-px N` adjusts Bidirectional Recovery reach (default `15`,
+giving 7 pixels left and right). Use `3` for the earlier 1-pixel reach, `1` for
+vertical-only selection, or `9` for a 4-pixel reach on each side. These distances are
+pixels at the template DPI.
+
+The reusable function `southern_dilate()` in `src/automarker/regions.py` keeps the
+detected lower-edge position and estimates thickness from two end portions of that
+edge: **10–25% from the left and 75–90% from the left**, avoiding the corners and
+central writing. It measures contiguous vertical ink runs in each portion, computes
+each portion's arithmetic mean, and uses the larger mean. Runs reaching the search
+limit (0.6 mm per direction, at least 2 pixels) are excluded. If only one portion has
+usable runs, that portion is used; neither gives a 1-pixel thickness fallback.
+The mask retains the existing rounding, one-pixel guard, and DPI-based size cap.
+The selectable Protected Crossings function `southern_mask()` uses its median estimator.
+
+The new method erases the whole band and applies a vertical one-column dilation
+kernel in a strip extending **7 pixels above and below the removal band**. It then
+independently dilates the vertical mask **7 pixels left and 7 pixels right**, each
+including the source pixels (a total horizontal span of 15 pixels). This larger reach
+recovers wider curved crossings, such as the lower loop of an 8. After clipping both
+to the strip, it adds them using **uint16** and thresholds at **sum > 255**. Only pixels
+supported by both directional masks survive; one-sided outer rims are rejected, while
+short gaps between strokes can be filled. The thresholded selection is intersected
+with the original ink. It restores
+only those original pixels inside the erased band. Foreground outside the band is
+unchanged; no new ink pixels are introduced. `strip_padding_px` can adjust the 7-pixel
+extension. `horizontal_dilation_width_px` adjusts the total horizontal span; use `1`
+for vertical-only selection. The result includes `vertical_recovered_ink` for the
+vertical-only recovery and `thickness_estimate` with both sample
+ranges, counts, and mean widths; `vertical_dilation_mask` and `dilation_mask` allow
+inspection before and after the horizontal overlap threshold. `left_dilation_mask`,
+`right_dilation_mask`, `horizontal_dilation_sum`, and `horizontal_union_mask` expose
+the directional stages and the previous union expansion, alongside the intermediate
+images and removal/restoration masks. The default kernel height is the masked band height plus two pixels,
+so the two sides can bridge the removed gap. Pass `dilation_height_px` to test another
+height; a centered kernel exactly equal to the band height can leave a one-pixel central
+gap. The selection can still restore nearby printed border fragments where they
+overlap the original ink. The `run` and `extract` commands apply the selected method;
+rerun OCR and the report after changing it.
 
 ## Provision and run math OCR offline
 
@@ -405,7 +547,8 @@ Then recognize a capture without internet:
 Inference enforces `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`, and
 `local_files_only=True`; missing files fail instead of triggering a download.
 It writes `recognition.json`. Use `--variant raw` or `--variant binary` to compare
-preprocessing, and `--max-tokens 256` to set the generation limit. Truncated results
+preprocessing; the variant must have been retained during extraction. Re-extract with
+that `--variant` or `--debug-images` if it is missing. Use `--max-tokens 256` to set the generation limit. Truncated results
 are flagged. Formulas are not executed or evaluated as Python. Mixed prose and
 multiline handwriting may need another OCR backend or segmentation.
 

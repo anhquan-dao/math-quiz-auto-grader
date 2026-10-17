@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 
 from .io import configure_logging, read_json, write_json
+from .regions import DEFAULT_HORIZONTAL_DILATION_WIDTH_PX, SOUTH_BORDER_METHODS
 
 
 def crop_options(parser: argparse.ArgumentParser) -> None:
@@ -18,6 +19,20 @@ def crop_options(parser: argparse.ArgumentParser) -> None:
                         help="Expand below the lower frame edge; clipped before other boxes (default: 2 mm)")
     parser.add_argument("--keep-south-border", action="store_true",
                         help="Disable bottom border removal from normalized/binary crops")
+    parser.add_argument("--south-border-method", choices=SOUTH_BORDER_METHODS, default="bidirectional-recovery",
+                        help="Border removal method (default: bidirectional-recovery)")
+    parser.add_argument("--horizontal-dilation-width-px", type=int, default=DEFAULT_HORIZONTAL_DILATION_WIDTH_PX,
+                        help="Bidirectional recovery span (default: 15, reaching 7 pixels each way)")
+    parser.add_argument("--debug-images", action="store_true",
+                        help="Save intermediate stages, masks, and all crop variants in debug/")
+    parser.add_argument("--tighten-ew", action=argparse.BooleanOptionalAction, default=True,
+                        help="Tighten east/west crop limits after binary processing (default: on)")
+    parser.add_argument("--tighten-mode", choices=("static", "dynamic", "both"), default="both",
+                        help="Fixed edge cut, whitespace trim, or static then dynamic (default: both)")
+    parser.add_argument("--static-tighten-mm", type=float, default=1.5,
+                        help="Fixed amount removed from each horizontal edge in static/both mode (default: 1.5 mm)")
+    parser.add_argument("--tighten-padding-mm", type=float, default=1.5,
+                        help="Dynamic margin kept around detected content (default: 1.5 mm)")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -40,6 +55,8 @@ def main(argv: list[str] | None = None) -> int:
                          help="Image files or directories (nonrecursive)")
     extract.add_argument("--output", type=Path, default=Path("outputs/captures"))
     extract.add_argument("--page", type=int, default=1)
+    extract.add_argument("--variant", choices=("raw", "normalized", "binary"), default="normalized",
+                         help="Final crop variant to retain alongside binary crops")
     crop_options(extract)
     download = sub.add_parser("download-model", help="Provision model weights (requires internet)")
     download.add_argument("--output", type=Path, default=Path("models/pix2text-mfr"))
@@ -100,7 +117,14 @@ def main(argv: list[str] | None = None) -> int:
             summary = process_captures(collect_images(args.images), template, args.output,
                                        args.page, args.inset_mm, box_mode=args.box_mode,
                                        box_search_mm=args.box_search_mm, south_mm=args.south_mm,
-                                       keep_south_border=args.keep_south_border)
+                                       keep_south_border=args.keep_south_border,
+                                       south_border_method=args.south_border_method,
+                                       horizontal_dilation_width_px=args.horizontal_dilation_width_px,
+                                       variant=args.variant, debug_images=args.debug_images,
+                                       tighten_ew=args.tighten_ew,
+                                       tighten_padding_mm=args.tighten_padding_mm,
+                                       tighten_mode=args.tighten_mode,
+                                       static_tighten_mm=args.static_tighten_mm)
             return 1 if summary["failed"] else 0
         elif args.command == "run":
             from .report import build_archive
@@ -117,7 +141,13 @@ def main(argv: list[str] | None = None) -> int:
             summary = process_captures(paths, template, args.output / "captures", args.page,
                                        args.inset_mm, args.model, args.variant, args.max_tokens, key,
                                        box_mode=args.box_mode, box_search_mm=args.box_search_mm,
-                                       south_mm=args.south_mm, keep_south_border=args.keep_south_border)
+                                       south_mm=args.south_mm, keep_south_border=args.keep_south_border,
+                                       south_border_method=args.south_border_method,
+                                       horizontal_dilation_width_px=args.horizontal_dilation_width_px,
+                                       debug_images=args.debug_images, tighten_ew=args.tighten_ew,
+                                       tighten_padding_mm=args.tighten_padding_mm,
+                                       tighten_mode=args.tighten_mode,
+                                       static_tighten_mm=args.static_tighten_mm)
             if summary["successful"]:
                 build_archive(args.output / "captures", args.output / "archive", key,
                               args.demo_expected, quiz_name=args.tex.stem)

@@ -113,7 +113,8 @@ def test_pipeline_expands_and_caps_crops_and_retains_unmasked_evidence(tmp_path,
                     {'id': 'a', 'bbox_px': [50, 60, 340, 120]},
                     {'id': 'b', 'bbox_px': [50, 148, 340, 183]}]}]}
     output = tmp_path / 'capture'
-    result = extract_capture(source, template, output, south_mm=10, keep_south_border=keep)
+    result = extract_capture(source, template, output, south_mm=10, keep_south_border=keep,
+                             debug_images=True)
     first, second = result['answers']
     assert first['frame']['detected'] and second['frame']['detected']
     assert first['neighbor_limited']
@@ -126,8 +127,9 @@ def test_pipeline_expands_and_caps_crops_and_retains_unmasked_evidence(tmp_path,
     before = read_image(output / first['files']['normalized_unmasked'])
     mask = read_image(output / first['files']['border_mask'])
     assert crop.shape == raw.shape == before.shape == mask.shape
-    assert (output / '09_crop_areas.png').exists() and (output / '10_border_mask.png').exists()
-    assert np.array_equal(crop[mask > 0], np.full_like(crop[mask > 0], 255))
+    assert (output / '03_boxes.png').exists() and (output / 'debug/10_border_mask.png').exists()
+    assert np.array_equal(crop[mask[:, :, 0] > 0],
+                          np.tile([0, 0, 255], (np.count_nonzero(mask[:, :, 0]), 1)))
     assert np.array_equal(crop[mask == 0], before[mask == 0])
 
 

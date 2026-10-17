@@ -21,7 +21,8 @@ def test_collect_images_filters_inputs_and_rejects_collisions(tmp_path):
         collect_images([tmp_path / "missing.jpg"])
 
 
-def test_batch_continues_after_bad_capture_and_clears_stale_failure(tmp_path):
+@pytest.mark.parametrize('method', ['bidirectional-recovery', 'protected-crossings'])
+def test_batch_continues_after_bad_capture_and_clears_stale_failure(tmp_path, method):
     image = np.full((800, 600, 3), 255, np.uint8)
     dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_1000)
     for marker_id, x, y in [(0, 20, 20), (1, 500, 700)]:
@@ -40,7 +41,8 @@ def test_batch_continues_after_bad_capture_and_clears_stale_failure(tmp_path):
     write_json(output / "good/failure.json", {"error": "obsolete failure"})
     write_json(output / "good/recognition.json", {"stale": True})
     write_json(output / "good/comparison.json", {"stale": True})
-    summary = process_captures([bad, good], template, output)
+    summary = process_captures([bad, good], template, output, south_border_method=method,
+                               horizontal_dilation_width_px=9)
     assert summary["successful"] == [str(good)]
     assert summary["failed"][0]["input"] == str(bad)
     assert summary["failed"][0]["stage"] == "extract"
@@ -48,4 +50,7 @@ def test_batch_continues_after_bad_capture_and_clears_stale_failure(tmp_path):
     assert not (output / "good/recognition.json").exists()
     assert not (output / "good/comparison.json").exists()
     assert (output / "good/extraction.json").is_file()
+    options = read_json(output / 'good/extraction.json')['crop_options']
+    assert options['south_border_method'] == method
+    assert options['horizontal_dilation_width_px'] == 9
     assert read_json(output / "summary.json") == summary

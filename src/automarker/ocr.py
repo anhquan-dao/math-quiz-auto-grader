@@ -3,8 +3,11 @@
 import logging
 import os
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from .io import read_json, write_json
+import numpy as np
+
+from .io import read_image, read_json, write_image, write_json
 
 LOG = logging.getLogger(__name__)
 MODEL_ID = "breezedeus/pix2text-mfr"
@@ -67,12 +70,24 @@ def recognize_extraction(extraction_path: Path, model_path: Path, variant: str =
     if max_tokens < 1:
         raise ValueError("max_tokens must be positive")
     extraction = read_json(extraction_path)
+    if any(variant not in answer["files"] for answer in extraction["answers"]):
+        raise ValueError(f"Crop variant {variant!r} was not saved. Re-extract with --variant {variant} "
+                         "or --debug-images to retain all variants.")
     ocr = engine if engine is not None else MathOCR(model_path)
-    for answer in extraction["answers"]:
-        image = extraction_path.parent / answer["files"][variant]
-        answer["ocr"] = ocr.recognize(image, max_tokens)
+    with TemporaryDirectory(prefix=".ocr-clean-", dir=extraction_path.parent) as temporary:
+        for index, answer in enumerate(extraction["answers"]):
+            image = extraction_path.parent / answer["files"][variant]
+            if variant == "normalized" and answer.get("normalized_overlay") == "south_border_mask_red":
+                clean = read_image(image)
+                overlay = np.all(clean == (0, 0, 255), axis=2)
+                clean[overlay] = 255
+                image = Path(temporary) / f"answer_{index:03d}.png"
+                write_image(image, clean)
+                LOG.debug("Removed %d red mask pixels for OCR of %s", np.count_nonzero(overlay), answer['id'])
+            answer["ocr"] = ocr.recognize(image, max_tokens)
     manifest = model_path / "automarker_model.json"
     extraction["ocr_model"] = read_json(manifest) if manifest.exists() else {"path": str(model_path)}
+    extraction["ocr_variant"] = variant
     write_json(extraction_path.parent / "recognition.json", extraction)
     LOG.info("Recognized %d answers in %s", len(extraction["answers"]), extraction_path.parent)
     return extraction

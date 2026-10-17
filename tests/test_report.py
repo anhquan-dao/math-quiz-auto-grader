@@ -51,6 +51,12 @@ def test_portable_archive_has_filename_pages_inline_images_fonts_and_demo_labels
     assert '<select' not in page
     assert 'data-verdict="correct"' in page and 'data-verdict="incorrect"' in page
     assert 'Auto: Incorrect' in page
+    assert 'data-toggle-latex aria-controls="answer-table" aria-pressed="false"' in page
+    assert 'Show recognized LaTeX' in page
+    assert 'id="answer-table" class="answers" data-latex-hidden="true"' in page
+    assert '<td class="recognized-latex-column">' in page
+    assert '<th scope="col" class="recognized-latex-column">Recognized LaTeX</th>' in page
+    assert 'data-toggle-latex aria-controls' not in index
     assert read_json(output / "archive.json")["assessment"] == "assessment.csv"
 
 

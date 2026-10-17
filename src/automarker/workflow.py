@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .io import write_json
 from .pipeline import extract_capture
+from .regions import DEFAULT_HORIZONTAL_DILATION_WIDTH_PX
 
 LOG = logging.getLogger(__name__)
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"}
@@ -30,7 +31,12 @@ def process_captures(paths: list[Path], template: dict, output: Path,
                      model: Path | None = None, variant: str = "normalized",
                      max_tokens: int = 256, key: dict | None = None, *,
                      box_mode: str = "refine", box_search_mm: float = 2.,
-                     south_mm: float = 2., keep_south_border: bool = False) -> dict:
+                     south_mm: float = 2., keep_south_border: bool = False,
+                     debug_images: bool = False, tighten_ew: bool = True,
+                     tighten_padding_mm: float = 1.5, tighten_mode: str = "both",
+                     static_tighten_mm: float = 1.5,
+                     south_border_method: str = "bidirectional-recovery",
+                     horizontal_dilation_width_px: int = DEFAULT_HORIZONTAL_DILATION_WIDTH_PX) -> dict:
     engine = None
     if model is not None:
         from .ocr import MathOCR
@@ -42,7 +48,12 @@ def process_captures(paths: list[Path], template: dict, output: Path,
         try:
             extract_capture(path, template, capture_output, page, inset_mm,
                             box_mode=box_mode, box_search_mm=box_search_mm,
-                            south_mm=south_mm, keep_south_border=keep_south_border)
+                            south_mm=south_mm, keep_south_border=keep_south_border,
+                            variant=variant, debug_images=debug_images,
+                            tighten_ew=tighten_ew, tighten_padding_mm=tighten_padding_mm,
+                            tighten_mode=tighten_mode, static_tighten_mm=static_tighten_mm,
+                            south_border_method=south_border_method,
+                            horizontal_dilation_width_px=horizontal_dilation_width_px)
             # New crops invalidate recognition and comparisons from an earlier run.
             for filename in ("recognition.json", "comparison.json"):
                 (capture_output / filename).unlink(missing_ok=True)

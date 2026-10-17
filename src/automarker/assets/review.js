@@ -10,6 +10,17 @@
   const pageKey = JSON.stringify([config.source, String(config.page)]);
   let saved = new Map(), snapshot = null, dirty = false, saving = false, destination = null;
 
+  const latexToggle = document.querySelector('[data-toggle-latex]');
+  const answerTable = document.getElementById('answer-table');
+  if (latexToggle && answerTable) {
+    latexToggle.addEventListener('click', () => {
+      const show = answerTable.dataset.latexHidden === 'true';
+      answerTable.dataset.latexHidden = String(!show);
+      latexToggle.setAttribute('aria-pressed', String(show));
+      latexToggle.textContent = (show ? 'Hide' : 'Show') + ' recognized LaTeX';
+    });
+  }
+
   function message(text, error = false) {
     status.textContent = text;
     status.classList.toggle('error', error);
